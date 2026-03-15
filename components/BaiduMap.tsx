@@ -122,7 +122,7 @@ export default function BaiduMap() {
           if (z >= 15) {
             zoomSearchTimerRef.current = setTimeout(() => {
               searchNearbyToiletsOnMap(BMapGL, map, map.getCenter());
-            }, 800);
+            }, 500);
           } else {
             clearPOIMarkers(map);
             setNearbyPOIs([]);
@@ -364,28 +364,6 @@ export default function BaiduMap() {
     return pois;
   };
 
-  // ─── 附近厕所搜索→侧边栏（定位触发）─────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const searchNearbyToilets = (BMapGL: any, map: any, center: any) => {
-    setNearbyLoading(true);
-    const search = new BMapGL.LocalSearch(center, {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      onSearchComplete: (results: any) => {
-        setNearbyLoading(false);
-        if (!results) { setNearbyPOIs([]); return; }
-        const pois = parsePOIs(results).map((p, i) => ({
-          uid: p.uid ?? `poi-${i}`,
-          name: p.name,
-          address: p.address,
-          lng: p.lng,
-          lat: p.lat,
-        }));
-        setNearbyPOIs(pois);
-      },
-    });
-    search.searchNearby("厕所", center, 1500);
-  };
-
   // ─── 用户定位 ─────────────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const locateUser = (BMapGL: any, map: any) => {
@@ -418,7 +396,8 @@ export default function BaiduMap() {
       });
       map.addOverlay(dot);
 
-      searchNearbyToilets(BMapGL, map, result.point);
+      // 直接调 onMap 版本，不依赖 zoomend 事件（程序调用 setZoom 不触发该事件）
+      searchNearbyToiletsOnMap(BMapGL, map, result.point);
     });
   };
 
