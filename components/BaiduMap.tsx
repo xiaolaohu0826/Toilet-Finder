@@ -72,7 +72,8 @@ export default function BaiduMap() {
   const poiMarkersRef = useRef<any[]>([]);
 
   const searchActiveRef = useRef(false);
-  const zoomSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // mapTick: moveend/zoomend 时递增，驱动 useEffect 触发搜索
+  const [mapTick, setMapTick] = useState(0);
   const userPosRef = useRef<{ lat: number; lng: number } | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const routeRef = useRef<any>(null);
@@ -113,24 +114,12 @@ export default function BaiduMap() {
         setSelectedPOI(null);
       });
 
-      // zoom / 拖动 → 自动搜附近厕所（共用防抖 timer）
-      const onMapMove = () => {
-        const z: number = map.getZoom();
-        setZoom(z);
-        if (zoomSearchTimerRef.current) clearTimeout(zoomSearchTimerRef.current);
-        if (!searchActiveRef.current) {
-          if (z >= 15) {
-            zoomSearchTimerRef.current = setTimeout(() => {
-              searchNearbyToiletsOnMap(BMapGL, map, map.getCenter());
-            }, 500);
-          } else {
-            clearPOIMarkers(map);
-            setNearbyPOIs([]);
-          }
-        }
-      };
-      map.addEventListener("zoomend", onMapMove);
-      map.addEventListener("moveend", onMapMove);
+      // zoom/拖动只更新 state，搜索逻辑交给 useEffect 处理（避免闭包失效）
+      map.addEventListener("zoomend", () => {
+        setZoom(map.getZoom());
+        setMapTick((t) => t + 1);
+      });
+      map.addEventListener("moveend", () => setMapTick((t) => t + 1));
 
       setLoading(false);
       locateUser(BMapGL, map);
@@ -182,6 +171,28 @@ export default function BaiduMap() {
     if (!loading) applyToiletFilter(filter);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, loading]);
+
+  // zoom/拖动触发自动搜厕（debounce 用 cleanup 实现，每次都拿最新函数引用）
+  useEffect(() => {
+    if (loading || searchActiveRef.current || zoom < 15) return;
+    const map = mapInstance.current;
+    const BMapGL = window.BMapGL;
+    if (!map || !BMapGL) return;
+    const timer = setTimeout(() => {
+      searchNearbyToiletsOnMap(BMapGL, map, map.getCenter());
+    }, 500);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, mapTick, loading]);
+
+  // zoom < 15 时清除自动搜结果
+  useEffect(() => {
+    if (loading || zoom >= 15 || searchActiveRef.current) return;
+    const map = mapInstance.current;
+    if (map) clearPOIMarkers(map);
+    setNearbyPOIs([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom, loading]);
 
   // ─── 搜索候选（LocalSearch 驱动）────────────────────────────────────────────
   const getSuggestions = useCallback((query: string): Promise<string[]> => {
@@ -380,6 +391,8 @@ export default function BaiduMap() {
       userPosRef.current = { lat: result.point.lat, lng: result.point.lng };
       map.panTo(result.point);
       map.setZoom(15);
+      setZoom(15);         // 触发 useEffect 自动搜
+      setMapTick((t) => t + 1);
 
       // 精度圆 + 醒目大图标
       const circle = new BMapGL.Circle(result.point, 40, {
@@ -395,9 +408,6 @@ export default function BaiduMap() {
         ),
       });
       map.addOverlay(dot);
-
-      // 直接调 onMap 版本，不依赖 zoomend 事件（程序调用 setZoom 不触发该事件）
-      searchNearbyToiletsOnMap(BMapGL, map, result.point);
     });
   };
 
